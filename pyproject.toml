@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fabric"
+version = "0.1.0"
+description = "Infrastructure abstraction layer for Forge Foundation"
+requires-python = ">=3.10"
+dependencies = [
+    "requests==2.31.0",
+    "pydantic==2.5.0",
+    "python-dotenv==1.0.0",
+]
