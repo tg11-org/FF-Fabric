@@ -25,10 +25,12 @@ from fabric.models import (
 )
 from fabric.clients import ProxmoxClient
 from fabric.providers import ProxmoxFabric
+from fabric.api import app
 
 __all__ = [
     "FabricProvider",
     "ProxmoxFabric",
+    "app",
     "ProxmoxClient",
     "FabricException",
     "ProviderError",
