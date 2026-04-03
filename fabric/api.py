@@ -6,13 +6,22 @@ without direct SDK coupling.
 """
 
 from os import getenv
-from typing import NoReturn, Optional
+from typing import Any, NoReturn, Optional
+from datetime import datetime
+from uuid import uuid4
 
 from fastapi import Body, FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from fabric.exceptions import InstanceNotFound, OperationFailed, ProviderError
-from fabric.models import CreateContainerRequest, CreateVMRequest
+from fabric.models import (
+    CreateContainerRequest,
+    CreateVMRequest,
+    CreateInstanceResult,
+    InstanceStatusResult,
+    InstanceStatus,
+    InstanceKind,
+)
 from fabric.providers import ProxmoxFabric
 
 
@@ -49,11 +58,74 @@ class LifecycleAPIResponse(BaseModel):
     task_id: Optional[str] = None
 
 
-_provider: Optional[ProxmoxFabric] = None
+_provider: Optional[Any] = None
 
 
-def _build_provider() -> ProxmoxFabric:
+class FakeFabricProvider:
+    """Local fake provider for integration/dev without Proxmox."""
+
+    def create_container(self, request: CreateContainerRequest) -> CreateInstanceResult:
+        provider_ref = f"lxc:{request.node_id}:{self._next_id()}"
+        return CreateInstanceResult(
+            provider_ref=provider_ref,
+            node_id=request.node_id,
+            kind=InstanceKind.CONTAINER,
+            status=InstanceStatus.RUNNING,
+            created_at=datetime.utcnow(),
+        )
+
+    def create_vm(self, request: CreateVMRequest) -> CreateInstanceResult:
+        provider_ref = f"qemu:{request.node_id}:{self._next_id()}"
+        return CreateInstanceResult(
+            provider_ref=provider_ref,
+            node_id=request.node_id,
+            kind=InstanceKind.VM,
+            status=InstanceStatus.RUNNING,
+            created_at=datetime.utcnow(),
+        )
+
+    def start_instance(self, provider_ref: str) -> InstanceStatusResult:
+        return self._status(provider_ref, InstanceStatus.RUNNING)
+
+    def stop_instance(self, provider_ref: str) -> InstanceStatusResult:
+        return self._status(provider_ref, InstanceStatus.STOPPED)
+
+    def reboot_instance(self, provider_ref: str) -> InstanceStatusResult:
+        return self._status(provider_ref, InstanceStatus.RUNNING)
+
+    def delete_instance(self, provider_ref: str) -> None:
+        return None
+
+    def get_instance_status(self, provider_ref: str) -> InstanceStatusResult:
+        return self._status(provider_ref, InstanceStatus.RUNNING)
+
+    @staticmethod
+    def _next_id() -> str:
+        return str(uuid4().int % 100000)
+
+    @staticmethod
+    def _status(provider_ref: str, status_value: InstanceStatus) -> InstanceStatusResult:
+        parts = provider_ref.split(":")
+        if len(parts) != 3:
+            raise InstanceNotFound(provider_ref)
+        kind_name, node_id, _ = parts
+        kind = InstanceKind.CONTAINER if kind_name == "lxc" else InstanceKind.VM
+        return InstanceStatusResult(
+            provider_ref=provider_ref,
+            node_id=node_id,
+            kind=kind,
+            hostname="fake-instance",
+            status=status_value,
+            ip_address="10.42.0.10",
+        )
+
+
+def _build_provider() -> Any:
     """Create a Proxmox provider from environment variables."""
+    fabric_provider = getenv("FABRIC_PROVIDER", "proxmox").strip().lower()
+    if fabric_provider == "fake":
+        return FakeFabricProvider()
+
     proxmox_url = getenv("PROXMOX_URL", "").strip()
     api_token = getenv("PROXMOX_API_TOKEN", "").strip()
     verify_ssl = getenv("PROXMOX_VERIFY_SSL", "true").lower() == "true"
@@ -72,7 +144,7 @@ def _build_provider() -> ProxmoxFabric:
     )
 
 
-def get_provider() -> ProxmoxFabric:
+def get_provider() -> Any:
     """Get singleton provider instance."""
     global _provider
     if _provider is None:
